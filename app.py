@@ -14,6 +14,8 @@ print("started")
 
 @app.route('/bot', methods=['POST'])
 def bot():
+    #debug
+    print("Recieving payload: {}".format(request.values))
     incoming_msg = request.values['Body']
     chat_log = session.get('chat_log')
 
@@ -21,7 +23,7 @@ def bot():
     user_phone = request.values["From"]
 
     #debug
-    print(answer)
+    print("The answer: {}".format(answer))
     session['chat_log'] = append_interaction_to_chat_log(incoming_msg, answer, chat_log)
 
     message = client.messages \
