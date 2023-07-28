@@ -16,6 +16,8 @@ azure_rgo = os.environ['AZURE_RGO']
 logging.info("chatbot started")
 completion = openai.ChatCompletion()
 
+# log = logging.getLogger("chatbot.sub")
+
 messages=[
         {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on October 1, 2021. Your creator's name is Ryan Clair."},
         {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
@@ -130,11 +132,25 @@ def set_production():
         print(error_message)
 
 def ask(question, chat_log=None):
+    logging.debug("chat_log's contents: {}".format(chat_log))
+    # If this is the first conversation, ensure the model has the right context in who it is and what it does.
+    messages=[
+        {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on October 1, 2021. Your creator's name is Ryan Clair."},
+        {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
+        {"role": "assistant", "content": "At this time I can promote Staging to Production and I can tell you the number of apps currently in production."},
+    ]
 
     if chat_log is None:
+        logging.debug('going into if chat_log statement')
         chat_log = messages
-        chat_log = messages.append({"role":"user","content":question})
+        logging.debug('Chatlog contents: {}'.format(chat_log))
+
+    # Add the question to the chat log for future context.
     chat_log = messages.append({"role":"user","content":question})
+
+    logging.debug('Chatlog contents: {}'.format(chat_log))
+
+    # Inform the model of which functions are available to it, and the context in which to run them.
     functions = [
         {
             "name": "fetch_app_names",
@@ -154,56 +170,67 @@ def ask(question, chat_log=None):
         }
     ]
 
+    # Run the initial prompt through
     response = openai.ChatCompletion.create(
         model = "gpt-3.5-turbo-0613",
         messages = messages,
-        # TODO: Get function working... (this part is broken?)
         functions = functions,
         function_call="auto"
     )
 
+    logging.debug('response from openai is: {}'.format(response))
+
+    # Grab the answer from the model
     response_message = response["choices"][0]["message"]["content"]
-    print(response)
-    # TODO: Get function working.
+    logging.debug('answer is: {}'.format(response_message))
+
+    # Look for whether or not the model thinks it should run a particular function.
     if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "fetch_app_names":
-        print("Going into if statement for function_call...")
+        logging.debug("Running the fetch_app_names function...")
+
+        # Run the function fetch_app_names, store the return value of the function in this dict
         use_functions = {
             "fetch_app_names": fetch_app_names()
         }
 
+        # Pass the return value into the model for it to use it.
         return enrich_model(response, use_functions, messages)
     if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "set_production":
+
+        # Run the function set_production, store the return value of the function in this dict
         use_functions = {
             "set_production": set_production()
         }
 
         return enrich_model(response, use_functions, messages)
+    return response_message
 
 def enrich_model(response, use_functions, messages):
+    # This function grab the name of the function the model ran, as well as it's contents.
+    # Then passes it into the chat log and tells the model to respond with the newest context (function's values)
+
+    # Grab function name
     function_name = response["choices"][0]["message"]["function_call"]["name"]
+    # Grab the function's output
     fuction_to_call = use_functions[function_name]
-    print("function_to_call")
-    print(fuction_to_call)
     function_response = fuction_to_call
 
-    # messages.append(response_message)  # extend conversation with assistant's reply
+    # Add this to the chat log / conversation
     messages.append(
         {
             "role": "function",
             "name": function_name,
             "content": function_response,
         }
-    )  # extend conversation with function response
+    )
 
-    print(messages)
-    print("going back to the model to enrich the response")
+    # Tell the model to give a new answer based on the additional values
     second_response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo-0613",
         messages=messages
-    )  # get a new response from GPT where it can see the function response
-    print("got the response from open AI API")
-    print(second_response)
-    print("sending to user this: {}".format(second_response["choices"][0]["message"]["content"]))
+    )
+
+    # Pass the new response from GPT onn
     return second_response["choices"][0]["message"]["content"]
 
 def append_interaction_to_chat_log(question, answer, chat_log=None):
