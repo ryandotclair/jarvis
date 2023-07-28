@@ -12,14 +12,12 @@ directory_id = os.environ['AZURE_DIRECTORYID']
 app_id = os.environ['AZURE_APPID']
 app_value_id = os.environ['AZURE_APP_VALUEID']
 azure_rgo = os.environ['AZURE_RGO']
-#debug
+
 logging.info("chatbot started")
 completion = openai.ChatCompletion()
 
-# log = logging.getLogger("chatbot.sub")
-
 messages=[
-        {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on October 1, 2021. Your creator's name is Ryan Clair."},
+        {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on October 1, 2021. Your creator's name is Ryan Clair. Your responses are always under 320 characters."},
         {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
         {"role": "assistant", "content": "At this time I can promote Staging to Production and I can tell you the number of apps currently in production."},
     ]
@@ -40,7 +38,8 @@ def post_data_with_authentication(url, token, payload):
         "Authorization": f"Bearer {token}"
     }
     response = requests.request("POST", url, headers=headers, json=payload)
-    # print(response.text)
+    logging.info("response from post_data_with_auth function: {}".format(response))
+
     return response
 
 def azure_auth():
@@ -95,7 +94,7 @@ def set_production():
     set_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}/setActiveDeployments?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app)
 
     azure_token = azure_auth()
-    # print(azure_token)
+    logging.debug(azure_token)
 
     try:
         print("Authenticating...")
@@ -130,6 +129,36 @@ def set_production():
     except requests.exceptions.RequestException as e:
         error_message = f"Error occurred: {e}"
         print(error_message)
+
+def create_app(name):
+    app_name = name.lower()
+    create_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app_name)
+
+    logging.info("crafted URL for create_app: {}".format(create_url))
+    azure_token = azure_auth()
+    logging.info(azure_token)
+
+    try:
+
+        payload = {
+            "properties": {
+                "public": True
+                }
+            }
+
+        logging.info("payload for create_app: {}".format(payload))
+        response = post_data_with_authentication(create_url, azure_token,payload)
+        logging.info("response from create_app API: {}".format(response))
+
+        return "Created."
+
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error occurred: {e}"
+        print(error_message)
+
+def cleanup_empty_apps():
+
+    return "Done."
 
 def ask(question, chat_log=None):
     logging.debug("chat_log's contents: {}".format(chat_log))
@@ -167,9 +196,25 @@ def ask(question, chat_log=None):
                 "type": "object",
                 "properties" : {}
                 }
+        },
+        #create_instance(name)
+        {
+            "name": "create_app",
+            "description": "Create a new app. This app goes into ASA-E",
+            "parameters": {
+                "type": "object",
+                "properties" : {
+                    "name": {
+                        "type": "string",
+                        "description": "This is the name of the application you want to create. It must be all lower case, with no special characters",
+                    }
+                },
+                "required": ["name"]
+            }
         }
     ]
 
+    #TODO: Check for 500 error (server overloaded)
     # Run the initial prompt through
     response = openai.ChatCompletion.create(
         model = "gpt-3.5-turbo-0613",
@@ -178,11 +223,30 @@ def ask(question, chat_log=None):
         function_call="auto"
     )
 
-    logging.debug('response from openai is: {}'.format(response))
+    logging.debug("OpenAI's response payload: {}".format(response))
+    answer = response["choices"][0]["message"]["content"]
+    # catch if the response has too many characters.
+    if (len(str(answer))) > 300:
+        logging.info('Answer from the model exceeds character count we want. Catching and re-prompting.')
+        # Capture the answer to chat_log, ask the model to summarize the answer to under 300 characters
+        chat_log = messages.append({"role":"assistant","content":answer})
+        chat_log = messages.append({"role":"user","content":"Summarize the above in under 300 characters"})
+
+        #TODO: Check for 500 error (server overloaded)
+        # re-prompt
+        response = openai.ChatCompletion.create(
+            model = "gpt-3.5-turbo-0613",
+            messages = messages,
+            functions = functions,
+            function_call="auto"
+        )
+
+        answer = response["choices"][0]["message"]["content"]
+
+    logging.info('response from openai is: {}'.format(response))
 
     # Grab the answer from the model
-    response_message = response["choices"][0]["message"]["content"]
-    logging.debug('answer is: {}'.format(response_message))
+    logging.debug('answer is: {}'.format(answer))
 
     # Look for whether or not the model thinks it should run a particular function.
     if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "fetch_app_names":
@@ -195,6 +259,7 @@ def ask(question, chat_log=None):
 
         # Pass the return value into the model for it to use it.
         return enrich_model(response, use_functions, messages)
+
     if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "set_production":
 
         # Run the function set_production, store the return value of the function in this dict
@@ -203,7 +268,22 @@ def ask(question, chat_log=None):
         }
 
         return enrich_model(response, use_functions, messages)
-    return response_message
+
+    if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "create_app":
+        # Run the function set_production, store the return value of the function in this dict
+        name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
+
+        name_temp = name_dict.strip("\n").strip('\"')
+        app_name_dict = json.loads(name_temp)
+
+        logging.info("The app_name is {}".format(app_name_dict["name"]))
+        app_name = app_name_dict["name"]
+        use_functions = {
+            "create_app": create_app(str(app_name))
+        }
+
+        return enrich_model(response, use_functions, messages)
+    return answer
 
 def enrich_model(response, use_functions, messages):
     # This function grab the name of the function the model ran, as well as it's contents.
@@ -215,6 +295,7 @@ def enrich_model(response, use_functions, messages):
     fuction_to_call = use_functions[function_name]
     function_response = fuction_to_call
 
+    #TODO: Check for 500 error (server overloaded)
     # Add this to the chat log / conversation
     messages.append(
         {

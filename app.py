@@ -4,6 +4,7 @@ from twilio.rest import Client
 from chatbot import ask, append_interaction_to_chat_log
 from logging.config import dictConfig
 
+# Configures Flasks's logging format
 dictConfig({
     'version': 1,
     'formatters': {'default': {
@@ -34,7 +35,9 @@ app.logger.info("App started")
 
 @app.route('/bot', methods=['POST'])
 def bot():
-    #debug
+    # This function parses the webhook from Twilio, grabs the question from user, and passes it on to OpenAI
+    # It also grabs the chat_log from the session state, personalizing the conversation to each user with 
+    # additional context.
     app.logger.info("Recieving payload: {}".format(request.values))
     incoming_msg = request.values['Body']
     chat_log = session.get('chat_log')
@@ -43,7 +46,6 @@ def bot():
 
     user_phone = request.values["From"]
 
-    #debug
     app.logger.info("The answer: {}".format(answer))
     session['chat_log'] = append_interaction_to_chat_log(incoming_msg, answer, chat_log)
 
@@ -58,7 +60,7 @@ def bot():
 
 @app.route('/healthz', methods=['GET'])
 def health():
-
+    # This endpoint is used for Readiness Probes.
     return jsonify("up")
 
 if __name__ == '__main__':
