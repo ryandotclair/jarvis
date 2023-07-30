@@ -16,11 +16,18 @@ azure_rgo = os.environ['AZURE_RGO']
 logging.info("chatbot started")
 completion = openai.ChatCompletion()
 
+    # If this is the first conversation, ensure the model has the right context in who it is and what it does.
 messages=[
-        {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on October 1, 2021. Your creator's name is Ryan Clair. Your responses are always under 320 characters."},
-        {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
-        {"role": "assistant", "content": "At this time I can promote Staging to Production and I can tell you the number of apps currently in production."},
-    ]
+    {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring \
+        Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm.\
+        Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on \
+        October 1, 2021. Your creator's name is Ryan Clair. For Azure Spring Apps Enterprise you can promote \
+        Staging to Production and can tell the number of apps currently in production."},
+    {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
+    {"role": "assistant", "content": "At this time I can promote Staging to Production and I can tell you the \
+        number of apps currently in production."},
+]
+
 
 def get_data_with_authentication(url, token):
     print("Running GET with auth...")
@@ -162,12 +169,6 @@ def cleanup_empty_apps():
 
 def ask(question, chat_log=None):
     logging.debug("chat_log's contents: {}".format(chat_log))
-    # If this is the first conversation, ensure the model has the right context in who it is and what it does.
-    messages=[
-        {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on October 1, 2021. Your creator's name is Ryan Clair."},
-        {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
-        {"role": "assistant", "content": "At this time I can promote Staging to Production and I can tell you the number of apps currently in production."},
-    ]
 
     if chat_log is None:
         logging.debug('going into if chat_log statement')
@@ -197,7 +198,6 @@ def ask(question, chat_log=None):
                 "properties" : {}
                 }
         },
-        #create_instance(name)
         {
             "name": "create_app",
             "description": "Create a new app. This app goes into ASA-E",
@@ -206,7 +206,8 @@ def ask(question, chat_log=None):
                 "properties" : {
                     "name": {
                         "type": "string",
-                        "description": "This is the name of the application you want to create. It must be all lower case, with no special characters",
+                        "description": "This is the name of the application you want to create. \
+                            It must be all lower case, with no special characters",
                     }
                 },
                 "required": ["name"]
@@ -249,7 +250,9 @@ def ask(question, chat_log=None):
     logging.debug('answer is: {}'.format(answer))
 
     # Look for whether or not the model thinks it should run a particular function.
-    if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "fetch_app_names":
+    if response["choices"][0]["finish_reason"] == "function_call" and \
+        response["choices"][0]["message"]["function_call"]["name"] == "fetch_app_names":
+
         logging.debug("Running the fetch_app_names function...")
 
         # Run the function fetch_app_names, store the return value of the function in this dict
@@ -260,8 +263,10 @@ def ask(question, chat_log=None):
         # Pass the return value into the model for it to use it.
         return enrich_model(response, use_functions, messages)
 
-    if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "set_production":
+    if response["choices"][0]["finish_reason"] == "function_call" and \
+        response["choices"][0]["message"]["function_call"]["name"] == "set_production":
 
+        logging.debug("Running the set_production function...")
         # Run the function set_production, store the return value of the function in this dict
         use_functions = {
             "set_production": set_production()
@@ -269,8 +274,11 @@ def ask(question, chat_log=None):
 
         return enrich_model(response, use_functions, messages)
 
-    if response["choices"][0]["finish_reason"] == "function_call" and response["choices"][0]["message"]["function_call"]["name"] == "create_app":
-        # Run the function set_production, store the return value of the function in this dict
+    if response["choices"][0]["finish_reason"] == "function_call" and \
+        response["choices"][0]["message"]["function_call"]["name"] == "create_app":
+
+        logging.debug("Running the create_app function...")
+        # Grab required function's input "name"
         name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
 
         name_temp = name_dict.strip("\n").strip('\"')
@@ -278,10 +286,13 @@ def ask(question, chat_log=None):
 
         logging.info("The app_name is {}".format(app_name_dict["name"]))
         app_name = app_name_dict["name"]
+
+        # Run the function, store the return value in this dict
         use_functions = {
             "create_app": create_app(str(app_name))
         }
 
+        # Add data to the conversation and tell model to give a new answer given new data
         return enrich_model(response, use_functions, messages)
     return answer
 

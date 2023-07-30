@@ -2,7 +2,7 @@
 # How to deploy this to Azure Spring Apps Enterprise
 
 ```
-az spring app deploy -n (app-name) -d default --source-path . --env OPENAI_KEY="" TWILIO_ACCOUNT_SID="" TWILIO_AUTH_TOKEN="" BOT_NUMBER="" SECRET_KEY="" AZURE_RGO="" AZURE_SUBSCRIPTION="" ASAE_INSTANCE="" AZURE_DIRECTORYID="" AZURE_APPID="" AZURE_APP_VALUEID=""
+az spring app deploy -n (app-name) -d default --source-path . --env OPENAI_KEY="" TWILIO_ACCOUNT_SID="" TWILIO_AUTH_TOKEN="" BOT_NUMBER="" SECRET_KEY="" AZURE_RGO="" AZURE_SUBSCRIPTION="" ASAE_INSTANCE="" AZURE_DIRECTORYID="" AZURE_APPID="" AZURE_APP_VALUEID="" BOT_URL=""
 ```
 
 # Where to get the keys
@@ -20,21 +20,22 @@ az spring app deploy -n (app-name) -d default --source-path . --env OPENAI_KEY="
 - Text your bot 😀
 
 # Additional (Optional) Things
-## Expected Environment Variables
+## Required Environment Variables Explained
 ```
-OPENAI_KEY="(your_openAI_key)"
-# Found here (after signup): https://platform.openai.com/account/api-keys
+OPENAI_KEY=""
+# This is your OpenAI key found here (after signup): https://platform.openai.com/account/api-keys
 
-SECRET_KEY="(random key for flask)"
+SECRET_KEY=""
+# This is just a random "secret" you use for Flask
 
-TWILIO_ACCOUNT_SID="(twilio SID)"
-# Found here (after signup): https://console.twilio.com/?frameUrl=/console
+TWILIO_ACCOUNT_SID=""
+# Your Twilio 'Account SID' can be found here (after signup): https://console.twilio.com/?frameUrl=/console
 
-TWILIO_AUTH_TOKEN="(twilio auth token)"
-# Found here (after signup): https://console.twilio.com/?frameUrl=/console
+TWILIO_AUTH_TOKEN=""
+# Your Twilio 'Auth Secret' can be found here (under Account SID): https://console.twilio.com/?frameUrl=/console
 
-BOT_NUMBER="(twilio phone number)"
-# Found here (after signup): https://console.twilio.com/us1/develop/phone-numbers/manage/incoming
+BOT_NUMBER=""
+# This is your Twilio phone number, found here (after signup): https://console.twilio.com/us1/develop/phone-numbers/manage/incoming
 
 AZURE_RGO="" 
 # This is your Azure Resource Group
@@ -54,6 +55,11 @@ AZURE_APPID=""
 AZURE_APP_VALUEID=""
 # Your "app registration" client secret.
 
+BOT_URL=""
+# This is this bot's URL. If deployed in Azure Spring Apps Enterprise you can find it using `az spring app show -n <app-name>`
+
+LOGGING_LEVEL=""
+# This is optional. Default is set to INFO.
 ```
 
 ## Steps to Run Locally
