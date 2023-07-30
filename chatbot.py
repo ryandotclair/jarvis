@@ -18,14 +18,14 @@ completion = openai.ChatCompletion()
 
     # If this is the first conversation, ensure the model has the right context in who it is and what it does.
 messages=[
-    {"role": "system", "content": "Your name is Jarvis. You are their personal AI assistant for Azure Spring \
+    {"role": "system", "content": "Your name is Jarvis. You are a personal AI assistant for Azure Spring \
         Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm.\
         Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on \
-        October 1, 2021. Your creator's name is Ryan Clair. For Azure Spring Apps Enterprise you can promote \
-        Staging to Production and can tell the number of apps currently in production."},
+        October 1, 2021. Your creator's name is Ryan Clair. In Azure Spring Apps Enterprise you can promote \
+        Staging to Production and can tell the number of apps currently running."},
     {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
-    {"role": "assistant", "content": "At this time I can promote Staging to Production and I can tell you the \
-        number of apps currently in production."},
+    {"role": "assistant", "content": "At this time I can promote Cyan app's Staging to Production and I can \
+        tell you the number of apps currently running in production."},
 ]
 
 
@@ -35,7 +35,7 @@ def get_data_with_authentication(url, token):
         "Authorization": f"Bearer {token}"
     }
     response = requests.get(url, headers=headers)
-    # print(response)
+    logging.debug("response from get_data_with_auth function: {}".format(response))
     return response
 
 def post_data_with_authentication(url, token, payload):
@@ -45,7 +45,7 @@ def post_data_with_authentication(url, token, payload):
         "Authorization": f"Bearer {token}"
     }
     response = requests.request("POST", url, headers=headers, json=payload)
-    logging.info("response from post_data_with_auth function: {}".format(response))
+    logging.debug("response from post_data_with_auth function: {}".format(response))
 
     return response
 
@@ -60,7 +60,8 @@ def azure_auth():
     }
 
     response = requests.request("POST", url, headers=headers, data=payload)
-    # print("Azure auth response: {}".format(str(response.text)))
+    logging.debug("response from azure_auth function: {}".format(response))
+
     bearer_token = response.json()["access_token"]
 
     return bearer_token
@@ -69,24 +70,22 @@ def fetch_app_names():
     url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance)
 
     azure_token = azure_auth()
-    print(azure_token)
+    logging.debug("fetch_app_names: this is the azure auth token: {}".format((azure_token)))
 
     try:
-        print("Authenticating...")
         response = get_data_with_authentication(url, azure_token)
-
 
         # Check if the request was successful (status code 200)
         if response.status_code == 200:
-            print("Authenticated")
+            logging.debug("fetch_app_names: Authenticated to ASA-E API, grabbing app list")
             data = response.json()["value"]
-            # print(data)
-            # print("/////////////")
             app_list = []
             for i in data:
                 app_list.append(i["name"])
-            return str(app_list).strip("[").strip("]")
-            # parsed = data
+            converted_string = ', '.join(app_list)
+            logging.debug("fetch_app_names: app list is: {}".format(converted_string))
+            return converted_string
+
         else:
             error_message = f"Failed to fetch data. Status code: {response.status_code}"
             print(error_message)
@@ -104,7 +103,6 @@ def set_production():
     logging.debug(azure_token)
 
     try:
-        print("Authenticating...")
         response = get_data_with_authentication(query_url, azure_token)
 
         active = response.json()["properties"]["active"]
@@ -164,27 +162,18 @@ def create_app(name):
         print(error_message)
 
 def cleanup_empty_apps():
-
+    # TODO: Once create_app is working, add a delete function that deletes all apps that are in empty state
     return "Done."
 
-def ask(question, chat_log=None):
-    logging.debug("chat_log's contents: {}".format(chat_log))
-
-    if chat_log is None:
-        logging.debug('going into if chat_log statement')
-        chat_log = messages
-        logging.debug('Chatlog contents: {}'.format(chat_log))
-
-    # Add the question to the chat log for future context.
-    chat_log = messages.append({"role":"user","content":question})
-
-    logging.debug('Chatlog contents: {}'.format(chat_log))
+def ask(question):
+    # Add the question to the conversation for future context.
+    messages.append({"role":"user","content":question})
 
     # Inform the model of which functions are available to it, and the context in which to run them.
     functions = [
         {
             "name": "fetch_app_names",
-            "description": "Get current app names deployed into production",
+            "description": "Get current app names deployed and running in production",
             "parameters": {
                 "type": "object",
                 "properties" : {}
@@ -192,7 +181,7 @@ def ask(question, chat_log=None):
         },
         {
             "name": "set_production",
-            "description": "Set what is currently in cyan app's staging into production",
+            "description": "Set what is currently in cyan app's staging into production. This takes only a few seconds",
             "parameters": {
                 "type": "object",
                 "properties" : {}
@@ -200,14 +189,14 @@ def ask(question, chat_log=None):
         },
         {
             "name": "create_app",
-            "description": "Create a new app. This app goes into ASA-E",
+            "description": "Create a new app in Azure Spring Apps Enterprise",
             "parameters": {
                 "type": "object",
                 "properties" : {
                     "name": {
                         "type": "string",
                         "description": "This is the name of the application you want to create. \
-                            It must be all lower case, with no special characters",
+                            It must be all lower case with no special characters",
                     }
                 },
                 "required": ["name"]
@@ -226,12 +215,13 @@ def ask(question, chat_log=None):
 
     logging.debug("OpenAI's response payload: {}".format(response))
     answer = response["choices"][0]["message"]["content"]
-    # catch if the response has too many characters.
+
+    # catch if the response has too many characters for texting UX.
     if (len(str(answer))) > 300:
         logging.info('Answer from the model exceeds character count we want. Catching and re-prompting.')
-        # Capture the answer to chat_log, ask the model to summarize the answer to under 300 characters
-        chat_log = messages.append({"role":"assistant","content":answer})
-        chat_log = messages.append({"role":"user","content":"Summarize the above in under 300 characters"})
+        # Capture the answer and ask the model to summarize the answer to under 300 characters
+        messages.append({"role":"assistant","content":answer})
+        messages.append({"role":"user","content":"Summarize the above in under 300 characters"})
 
         #TODO: Check for 500 error (server overloaded)
         # re-prompt
@@ -325,8 +315,21 @@ def enrich_model(response, use_functions, messages):
     # Pass the new response from GPT onn
     return second_response["choices"][0]["message"]["content"]
 
-def append_interaction_to_chat_log(question, answer, chat_log=None):
-    if chat_log is None:
-        chat_log = messages
-    chat_log = messages.append({"role":"assistant","content":answer})
-    return chat_log
+def append_interaction_to_conversation(answer):
+    # This function appends the answer from the model to the conversation
+    messages.append({"role":"assistant","content":answer})
+    logging.debug("append_interaction_to_conversation: messages var contains: {}".format(messages))
+    logging.debug("conversation total length is: {}".format(len(messages)))
+
+    # To limit number of tokens sent to OpenAI (there are limits), this starts to trim the conversation
+    # after 8 answers. The trim stops once the conversation "history" hits 11 (the initial 3 seeded ones
+    # and the last 4 questions/answers)
+    if len(messages) > 20:
+        logging.info("starting to pop the conversation")
+        counter = 0
+        while counter < 11:
+            logging.debug("conversation length is: {}".format(len(messages)))
+            messages.pop(3)
+            counter +=1
+        logging.debug("conversation popping is done. length is: {}".format(len(messages)))
+    return
