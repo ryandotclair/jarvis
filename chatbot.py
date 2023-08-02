@@ -3,6 +3,7 @@ import openai
 import logging
 import requests
 import json
+from requests.adapters import HTTPAdapter, Retry
 
 openai.api_key = os.environ.get('OPENAI_KEY')
 
@@ -24,8 +25,8 @@ messages=[
         October 1, 2021. Your creator's name is Ryan Clair. In Azure Spring Apps Enterprise you can promote \
         Staging to Production and can tell the number of apps currently running."},
     {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
-    {"role": "assistant", "content": "At this time I can promote Cyan app's Staging to Production and I can \
-        tell you the number of apps currently running in production."},
+    {"role": "assistant", "content": "I can promote Cyan app's Staging to Production, give you an app's url \
+        and I can tell you the number of apps currently running in production."},
 ]
 
 
@@ -50,29 +51,35 @@ def post_data_with_authentication(url, token, payload):
     return response
 
 def azure_auth():
-    url = "https://login.microsoftonline.com/{}/oauth2/token".format(directory_id)
+    try:
+        url = "https://login.microsoftonline.com/{}/oauth2/token".format(directory_id)
 
-    payload = "grant_type=client_credentials&client_id={}&client_secret={}&resource=https%3A%2F%2Fmanagement.azure.com%2F".format(app_id,app_value_id)
+        payload = "grant_type=client_credentials&client_id={}&client_secret={}&resource=https%3A%2F%2Fmanagement.azure.com%2F".format(app_id,app_value_id)
 
-    headers = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Cookie': 'fpc=AjtfSXJH2GxLg3UqoXUjQlmGw70iAwAAAITpVNwOAAAA; stsservicecookie=estsfd; x-ms-gateway-slice=estsfd'
-    }
+        headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': 'fpc=AjtfSXJH2GxLg3UqoXUjQlmGw70iAwAAAITpVNwOAAAA; stsservicecookie=estsfd; x-ms-gateway-slice=estsfd'
+        }
 
-    response = requests.request("POST", url, headers=headers, data=payload)
-    logging.debug("response from azure_auth function: {}".format(response))
+        response = requests.request("POST", url, headers=headers, data=payload)
+        logging.debug("response from azure_auth function: {}".format(response))
 
-    bearer_token = response.json()["access_token"]
+        bearer_token = response.json()["access_token"]
 
-    return bearer_token
+        return bearer_token
+
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error occurred: {e}"
+        logging.info(error_message)
+        return "Error. Issue authenticating with Azure API"
 
 def fetch_app_names():
-    url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance)
 
     azure_token = azure_auth()
     logging.debug("fetch_app_names: this is the azure auth token: {}".format((azure_token)))
 
     try:
+        url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance)
         response = get_data_with_authentication(url, azure_token)
 
         # Check if the request was successful (status code 200)
@@ -86,30 +93,52 @@ def fetch_app_names():
             logging.debug("fetch_app_names: app list is: {}".format(converted_string))
             return converted_string
 
-        else:
-            error_message = f"Failed to fetch data. Status code: {response.status_code}"
-            print(error_message)
-
     except requests.exceptions.RequestException as e:
         error_message = f"Error occurred: {e}"
-        print(error_message)
+        logging.debug(error_message)
+        return "Error. There was an error in retrieving the list."
 
-def set_production():
-    app = "cyan"
-    query_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}/deployments/green?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app)
-    set_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}/setActiveDeployments?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app)
+def get_app_url(app_name=None):
+    if app_name == None:
+        return "Error. The app name is required"
 
     azure_token = azure_auth()
     logging.debug(azure_token)
 
     try:
+        get_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app_name)
+        response = get_data_with_authentication(get_url, azure_token)
+
+        app_url = response.json()["properties"]["url"]
+
+        return app_url
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error occurred: {e}"
+        logging.warning(error_message)
+        return "Error. There was an issue with Azure's API"
+    except KeyError as e:
+        error_message = f"Error occurred: {e}"
+        logging.warning(error_message)
+        return "Error. App doesn't exist"
+
+
+def set_production():
+    app = "cyan"
+
+    azure_token = azure_auth()
+    logging.debug(azure_token)
+
+    try:
+        query_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}/deployments/green?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app)
+        set_url = "https://management.azure.com/subscriptions/{}/resourceGroups/{}/providers/Microsoft.AppPlatform/Spring/{}/apps/{}/setActiveDeployments?api-version=2023-05-01-preview".format(subscription, azure_rgo, asae_instance, app)
+
         response = get_data_with_authentication(query_url, azure_token)
 
         active = response.json()["properties"]["active"]
         # print(active)
         if active:
             # Green is active, so need to set Blue to production
-            print("green is active, switching to blue")
+            logging.info("green is active, switching to blue")
             payload = {
             "activeDeploymentNames": [
                 "blue"
@@ -121,7 +150,7 @@ def set_production():
             return("started")
         else:
             # Blue is active, so need to set Green to production
-            print("blue is active, switching to green")
+            logging.info("blue is active, switching to green")
             payload = {
             "activeDeploymentNames": [
                 "green"
@@ -133,7 +162,8 @@ def set_production():
             return("started")
     except requests.exceptions.RequestException as e:
         error_message = f"Error occurred: {e}"
-        print(error_message)
+        logging.warning(error_message)
+        return "Error. There was an issue with the Azure API."
 
 def create_app(name):
     app_name = name.lower()
@@ -159,7 +189,7 @@ def create_app(name):
 
     except requests.exceptions.RequestException as e:
         error_message = f"Error occurred: {e}"
-        print(error_message)
+        logging.warning(error_message)
 
 def cleanup_empty_apps():
     # TODO: Once create_app is working, add a delete function that deletes all apps that are in empty state
@@ -181,11 +211,27 @@ def ask(question):
         },
         {
             "name": "set_production",
-            "description": "Set what is currently in cyan app's staging into production. This takes only a few seconds",
+            "description": "Set what is currently in cyan app's staging into production. This takes only a few seconds. \
+                If you run this function again, it will rollback production.",
             "parameters": {
                 "type": "object",
                 "properties" : {}
                 }
+        },
+        {
+            "name": "get_app_url",
+            "description": "Return's the app's URL. This requires the app name.",
+            "parameters": {
+                "type": "object",
+                "properties" : {
+                    "app_name": {
+                        "type": "string",
+                        "description": "This is the name of the application you want the URL to. \
+                            It must be all lower case with no special characters",
+                    }
+                },
+                "required": ["app_name"]
+            }
         },
         {
             "name": "create_app",
@@ -204,14 +250,23 @@ def ask(question):
         }
     ]
 
-    #TODO: Check for 500 error (server overloaded)
+    #TODO: Confirm the 503 error (server overloaded) is resolved
     # Run the initial prompt through
-    response = openai.ChatCompletion.create(
-        model = "gpt-3.5-turbo-0613",
-        messages = messages,
-        functions = functions,
-        function_call="auto"
-    )
+    try:
+            session = requests.Session()
+            retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+            session.mount('http://', HTTPAdapter(max_retries=retries))
+            response = openai.ChatCompletion.create(
+                model = "gpt-3.5-turbo-0613",
+                messages = messages,
+                functions = functions,
+                function_call="auto"
+            )
+            answer = response["choices"][0]["message"]["content"]
+            logging.info('response from openai is: {}'.format(response))
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error occurred: {e}"
+        logging.warning(error_message)
 
     logging.debug("OpenAI's response payload: {}".format(response))
     answer = response["choices"][0]["message"]["content"]
@@ -223,20 +278,25 @@ def ask(question):
         messages.append({"role":"assistant","content":answer})
         messages.append({"role":"user","content":"Summarize the above in under 300 characters"})
 
-        #TODO: Check for 500 error (server overloaded)
+        #TODO: Confirm the 503 error (server overloaded) is resolved
         # re-prompt
-        response = openai.ChatCompletion.create(
-            model = "gpt-3.5-turbo-0613",
-            messages = messages,
-            functions = functions,
-            function_call="auto"
-        )
+        try:
+            session = requests.Session()
+            retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+            session.mount('http://', HTTPAdapter(max_retries=retries))
+            response = openai.ChatCompletion.create(
+                model = "gpt-3.5-turbo-0613",
+                messages = messages,
+                functions = functions,
+                function_call="auto"
+            )
+            answer = response["choices"][0]["message"]["content"]
+            logging.info('response from openai is: {}'.format(response))
+        except requests.exceptions.RequestException as e:
+            error_message = f"Error occurred: {e}"
+            logging.warning(error_message)
 
-        answer = response["choices"][0]["message"]["content"]
-
-    logging.info('response from openai is: {}'.format(response))
-
-    # Grab the answer from the model
+    # Log the answer from the model
     logging.debug('answer is: {}'.format(answer))
 
     # Look for whether or not the model thinks it should run a particular function.
@@ -284,6 +344,27 @@ def ask(question):
 
         # Add data to the conversation and tell model to give a new answer given new data
         return enrich_model(response, use_functions, messages)
+
+    if response["choices"][0]["finish_reason"] == "function_call" and \
+        response["choices"][0]["message"]["function_call"]["name"] == "get_app_url":
+
+        logging.debug("Running the create_app function...")
+        # Grab required function's input "name"
+        name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
+
+        name_temp = name_dict.strip("\n").strip('\"')
+        app_name_dict = json.loads(name_temp)
+
+        logging.info("The app_name is {}".format(app_name_dict["app_name"]))
+        app_name = app_name_dict["app_name"]
+
+        # Run the function, store the return value in this dict
+        use_functions = {
+            "get_app_url": get_app_url(str(app_name).lower())
+        }
+
+        # Add data to the conversation and tell model to give a new answer given new data
+        return enrich_model(response, use_functions, messages)
     return answer
 
 def enrich_model(response, use_functions, messages):
@@ -312,7 +393,7 @@ def enrich_model(response, use_functions, messages):
         messages=messages
     )
 
-    # Pass the new response from GPT onn
+    # Pass the new response from GPT on
     return second_response["choices"][0]["message"]["content"]
 
 def append_interaction_to_conversation(answer):
