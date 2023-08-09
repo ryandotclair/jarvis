@@ -1,6 +1,6 @@
 import os
 import time
-from flask import Flask, request, session, jsonify
+from flask import Flask, request, jsonify
 from twilio.rest import Client
 from chatbot import ask, append_interaction_to_conversation
 from logging.config import dictConfig

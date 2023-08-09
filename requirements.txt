@@ -26,3 +26,4 @@ twilio==8.5.0
 urllib3==2.0.4
 Werkzeug==2.3.6
 yarl==1.9.2
+gunicorn==21.2.0

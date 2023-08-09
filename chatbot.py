@@ -31,7 +31,7 @@ messages=[
 
 
 def get_data_with_authentication(url, token):
-    print("Running GET with auth...")
+    logging.debug("Running GET with auth...")
     headers = {
         "Authorization": f"Bearer {token}"
     }
@@ -40,14 +40,14 @@ def get_data_with_authentication(url, token):
     return response
 
 def post_data_with_authentication(url, token, payload):
-    print("Running POST with auth...")
+    logging.debug("Running POST with auth...")
 
     headers = {
         "Authorization": f"Bearer {token}"
     }
     response = requests.request("POST", url, headers=headers, json=payload)
     logging.debug("response from post_data_with_auth function: {}".format(response))
-
+    logging.debug("payload response from post_data_with_auth function: {}".format(response.text))
     return response
 
 def azure_auth():
@@ -135,7 +135,7 @@ def set_production():
         response = get_data_with_authentication(query_url, azure_token)
 
         active = response.json()["properties"]["active"]
-        # print(active)
+        logging.debug("SET_PRODUCTION: active var's contents: {}".format(active))
         if active:
             # Green is active, so need to set Blue to production
             logging.info("green is active, switching to blue")
@@ -146,7 +146,7 @@ def set_production():
             }
 
             post_data_with_authentication(set_url, azure_token, payload)
-            print("Done")
+            logging.debug("Done")
             return("started")
         else:
             # Blue is active, so need to set Green to production
@@ -158,7 +158,7 @@ def set_production():
             }
 
             post_data_with_authentication(set_url, azure_token, payload)
-            print("Done")
+            logging.debug("Done")
             return("started")
     except requests.exceptions.RequestException as e:
         error_message = f"Error occurred: {e}"
