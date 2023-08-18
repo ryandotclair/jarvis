@@ -201,7 +201,8 @@ def ask(question,user_id):
     functions = [
         {
             "name": "fetch_app_names",
-            "description": "Get current app names deployed and running in production",
+            "description": "Get current app names deployed and running in production. You can use this function to \
+                confirm if an app has been deleted or is gone.",
             "parameters": {
                 "type": "object",
                 "properties" : {}
@@ -230,22 +231,22 @@ def ask(question,user_id):
                 },
                 "required": ["app_name"]
             }
-        },
-        {
-            "name": "create_app",
-            "description": "Create a new app in Azure Spring Apps Enterprise",
-            "parameters": {
-                "type": "object",
-                "properties" : {
-                    "name": {
-                        "type": "string",
-                        "description": "This is the name of the application you want to create. \
-                            It must be all lower case with no special characters",
-                    }
-                },
-                "required": ["name"]
-            }
         }
+        # {
+        #     "name": "create_app",
+        #     "description": "Create a new app in Azure Spring Apps Enterprise",
+        #     "parameters": {
+        #         "type": "object",
+        #         "properties" : {
+        #             "name": {
+        #                 "type": "string",
+        #                 "description": "This is the name of the application you want to create. \
+        #                     It must be all lower case with no special characters",
+        #             }
+        #         },
+        #         "required": ["name"]
+        #     }
+        # }
     ]
 
     #TODO: Confirm the 503 error (server overloaded) is resolved
@@ -322,26 +323,26 @@ def ask(question,user_id):
 
         return enrich_model(response, use_functions, messages, user_id)
 
-    if response["choices"][0]["finish_reason"] == "function_call" and \
-        response["choices"][0]["message"]["function_call"]["name"] == "create_app":
+    # if response["choices"][0]["finish_reason"] == "function_call" and \
+    #     response["choices"][0]["message"]["function_call"]["name"] == "create_app":
 
-        logging.debug("Running the create_app function...")
-        # Grab required function's input "name"
-        name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
+    #     logging.debug("Running the create_app function...")
+    #     # Grab required function's input "name"
+    #     name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
 
-        name_temp = name_dict.strip("\n").strip('\"')
-        app_name_dict = json.loads(name_temp)
+    #     name_temp = name_dict.strip("\n").strip('\"')
+    #     app_name_dict = json.loads(name_temp)
 
-        logging.info("The app_name is {}".format(app_name_dict["name"]))
-        app_name = app_name_dict["name"]
+    #     logging.info("The app_name is {}".format(app_name_dict["name"]))
+    #     app_name = app_name_dict["name"]
 
-        # Run the function, store the return value in this dict
-        use_functions = {
-            "create_app": create_app(str(app_name))
-        }
+    #     # Run the function, store the return value in this dict
+    #     use_functions = {
+    #         "create_app": create_app(str(app_name))
+    #     }
 
-        # Add data to the conversation and tell model to give a new answer given new data
-        return enrich_model(response, use_functions, messages, user_id)
+    #     # Add data to the conversation and tell model to give a new answer given new data
+    #     return enrich_model(response, use_functions, messages, user_id)
 
     if response["choices"][0]["finish_reason"] == "function_call" and \
         response["choices"][0]["message"]["function_call"]["name"] == "get_app_url":
@@ -363,7 +364,7 @@ def ask(question,user_id):
 
         # Add data to the conversation and tell model to give a new answer given new data
         return enrich_model(response, use_functions, messages ,user_id)
-    
+
     return answer
 
 def enrich_model(response, use_functions, messages, user_id):
@@ -430,22 +431,3 @@ def get_hashed_user_id(plain_text_user):
     # Hash a user's phone number for the first time
     hashed = hashlib.sha256(plain_text_user.encode('utf-8'))
     return hashed.hexdigest()
-
-# def append_interaction_to_conversation(answer):
-#     # This function appends the answer from the model to the conversation
-#     messages.append({"role":"assistant","content":answer})
-#     logging.debug("append_interaction_to_conversation: messages var contains: {}".format(messages))
-#     logging.debug("conversation total length is: {}".format(len(messages)))
-
-#     # To limit number of tokens sent to OpenAI (there are limits), this starts to trim the conversation
-#     # after 8 answers. The trim stops once the conversation "history" hits 11 (the initial 3 seeded ones
-#     # and the last 4 questions/answers)
-#     if len(messages) > 20:
-#         logging.info("starting to pop the conversation")
-#         counter = 0
-#         while counter < 11:
-#             logging.debug("conversation length is: {}".format(len(messages)))
-#             messages.pop(3)
-#             counter +=1
-#         logging.debug("conversation popping is done. length is: {}".format(len(messages)))
-#     return
