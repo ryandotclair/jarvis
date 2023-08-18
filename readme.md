@@ -1,5 +1,5 @@
 
-# How to deploy this to Azure Spring Apps Enterprise
+# How to deploy this to Azure Spring Apps Enterprise (Non-Production)
 
 ```
 # Ensure you have the Spring extension installed
@@ -19,23 +19,32 @@ az account list-locations --query "[].{DisplayName:displayName, Name:name}" -o t
 az provider register --namespace Microsoft.SaaS
 az term accept --publisher vmware-inc --product azure-spring-cloud-vmware-tanzu-2 --plan asa-ent-hr-mtr
 
-# create an ASA-E instance (give it a globally unique name -- due to DNS reasons)
-az spring create --name ${SPRING_APPS_SERVICE} \
-    --resource-group ${RESOURCE_GROUP} \
-    --location ${REGION} \
-    --sku Enterprise \
-
 # set the defaults
 az configure --defaults \
     group=${RESOURCE_GROUP} \
     location=${REGION} \
     spring=${SPRING_APPS_SERVICE}
 
+# example of creating a Standard C1 instance of redis. Note: by default this is publically accessible. Recommend for production use to hide this behind a private vNET.
+az redis create --name {redis_name} --sku Standard --vm-size c1
+
+# Grab primary key from the redis instance (aka REDIS_ACCESS_KEY)
+az redis list-keys --name {redis_name}
+
+# Grab hostname (aka REDIS_LOC)
+az redis show --name jarvis-state --query hostName
+
+# create an ASA-E instance (give it a globally unique name -- due to DNS reasons)
+az spring create --name ${SPRING_APPS_SERVICE} \
+    --resource-group ${RESOURCE_GROUP} \
+    --location ${REGION} \
+    --sku Enterprise \
+
 # create the app construct (ex: jarvis)
 az spring app create --name jarvis
 
 # Ensure you're in the same directory as this code base and deploy the app (ex: jarvis)
-az spring app deploy -n jarvis -d default --source-path . --env OPENAI_KEY="" TWILIO_ACCOUNT_SID="" TWILIO_AUTH_TOKEN="" BOT_NUMBER="" SECRET_KEY="" AZURE_RGO="" AZURE_SUBSCRIPTION="" ASAE_INSTANCE="" AZURE_DIRECTORYID="" AZURE_APPID="" AZURE_APP_VALUEID="" BOT_URL=""
+az spring app deploy -n jarvis -d default --source-path . --env OPENAI_KEY="" TWILIO_ACCOUNT_SID="" TWILIO_AUTH_TOKEN="" BOT_NUMBER="" SECRET_KEY="" AZURE_RGO="" AZURE_SUBSCRIPTION="" ASAE_INSTANCE="" AZURE_DIRECTORYID="" AZURE_APPID="" AZURE_APP_VALUEID="" BOT_URL="" REDIS_LOC="" REDIS_ACCESS_KEY=""
 ```
 
 # Where to get the keys
@@ -79,26 +88,34 @@ BOT_NUMBER=""
 BOT_URL=""
 # Required. This is this bot's URL. If deployed in Azure Spring Apps Enterprise you can find it using `az spring app show -n <app-name>`. This is used in the callback from Twilio.
 
-AZURE_RGO="" 
+AZURE_RGO=""
 # Required to make ASA-E integration to work. This is your Azure Resource Group
 
-AZURE_SUBSCRIPTION="" 
+AZURE_SUBSCRIPTION=""
 # Required to make ASA-E integration to work. Your Azure Subscription ID
 
-ASAE_INSTANCE="" 
+ASAE_INSTANCE=""
 # Required to make ASA-E integration to work. The ASA-E Instance name (for now hard coded to one instance)
 
-AZURE_DIRECTORYID="" 
+AZURE_DIRECTORYID=""
 # Required to make ASA-E integration to work. Your Tenant ID
 
-AZURE_APPID="" 
+AZURE_APPID=""
 # Required to make ASA-E integration to work. Your "app registration"'s App ID in Azure Active Directory (used as the "account" for this bot when it's talking to Azure's APIs).
 
 AZURE_APP_VALUEID=""
 # Required to make ASA-E integration to work. Your "app registration" client "value" (it's right next to the secret--it becomes hidden after you save it).
 
+REDIS_LOC=""
+# Required to store the state of the conversation/messages (so you can scale Jarvis out if needed for performance reasons). This is the location (URL) of where redis is.
+
+REDIS_ACCESS_KEY=""
+# Required to store the state of the conversation/messages (so you can scale Jarvis out if needed for performance reasons). This is the "password" to accessing the redis instance.
+
 LOGGING_LEVEL=""
 # Optional. Default is set to INFO.
+
+
 ```
 
 ## Steps to Run Locally (Assumes Mac/Linux)
@@ -113,9 +130,14 @@ docker run -it -v .:/app -p 8080:8080 llm-chat-python
 In docker terminal:
 ```
 # run all your export commands for env vars mentioned above
-# And then run python command
+export OPENAI_KEY=""
+...
 
-python /app/app.py
+# install all app depdenencies
+pip install -r requirements
+
+# And then run using gunicorn command
+gunicorn -c gunicorn_config.py app:app
 ```
 Outside of docker terminal, in another terminal window:
 ```
@@ -125,7 +147,7 @@ pip install pyngrok
 # Run the ngrok tool
 ngrok http 8080
 
-# Grab the public URL that redirects to your localhost:8080
+# Grab the public URL that redirects to your localhost:8080 (note: this is temporary, and needs to be refresh occassionally)
 # Put this URL in your Twillio's phone number's messaging webhook
 ```
 
