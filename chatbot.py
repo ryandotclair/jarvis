@@ -3,6 +3,8 @@ import openai
 import logging
 import requests
 import json
+import redis
+import hashlib
 from requests.adapters import HTTPAdapter, Retry
 
 openai.api_key = os.environ.get('OPENAI_KEY')
@@ -13,21 +15,16 @@ directory_id = os.environ['AZURE_DIRECTORYID']
 app_id = os.environ['AZURE_APPID']
 app_value_id = os.environ['AZURE_APP_VALUEID']
 azure_rgo = os.environ['AZURE_RGO']
+redis_loc = os.environ['REDIS_LOC']
+redis_access_key = os.environ['REDIS_ACCESS_KEY']
 
 logging.info("chatbot started")
 completion = openai.ChatCompletion()
-
-    # If this is the first conversation, ensure the model has the right context in who it is and what it does.
-messages=[
-    {"role": "system", "content": "Your name is Jarvis. You are a personal AI assistant for Azure Spring \
-        Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm.\
-        Your model is based on OpenAI's gpt-3.5-turbo-0613, and was last updated by your developers on \
-        October 1, 2021. Your creator's name is Ryan Clair. In Azure Spring Apps Enterprise you can promote \
-        Staging to Production and can tell the number of apps currently running."},
-    {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
-    {"role": "assistant", "content": "I can promote Cyan app's Staging to Production, give you an app's url \
-        and I can tell you the number of apps currently running in production."},
-]
+r = redis.Redis(
+    host=redis_loc,
+    port=6380,
+    password=redis_access_key, # use your Redis password
+    ssl=True)
 
 
 def get_data_with_authentication(url, token):
@@ -121,7 +118,6 @@ def get_app_url(app_name=None):
         logging.warning(error_message)
         return "Error. App doesn't exist"
 
-
 def set_production():
     app = "cyan"
 
@@ -195,9 +191,11 @@ def cleanup_empty_apps():
     # TODO: Once create_app is working, add a delete function that deletes all apps that are in empty state
     return "Done."
 
-def ask(question):
+def ask(question,user_id):
     # Add the question to the conversation for future context.
+    messages=json.loads(json.loads(r.get(user_id))["messages"])
     messages.append({"role":"user","content":question})
+
 
     # Inform the model of which functions are available to it, and the context in which to run them.
     functions = [
@@ -212,7 +210,7 @@ def ask(question):
         {
             "name": "set_production",
             "description": "Set what is currently in cyan app's staging into production. This takes only a few seconds. \
-                If you run this function again, it will rollback production.",
+                If you run this function again, it will rollback (aka roll back) production, fixing it.",
             "parameters": {
                 "type": "object",
                 "properties" : {}
@@ -311,7 +309,7 @@ def ask(question):
         }
 
         # Pass the return value into the model for it to use it.
-        return enrich_model(response, use_functions, messages)
+        return enrich_model(response, use_functions, messages, user_id)
 
     if response["choices"][0]["finish_reason"] == "function_call" and \
         response["choices"][0]["message"]["function_call"]["name"] == "set_production":
@@ -322,7 +320,7 @@ def ask(question):
             "set_production": set_production()
         }
 
-        return enrich_model(response, use_functions, messages)
+        return enrich_model(response, use_functions, messages, user_id)
 
     if response["choices"][0]["finish_reason"] == "function_call" and \
         response["choices"][0]["message"]["function_call"]["name"] == "create_app":
@@ -343,7 +341,7 @@ def ask(question):
         }
 
         # Add data to the conversation and tell model to give a new answer given new data
-        return enrich_model(response, use_functions, messages)
+        return enrich_model(response, use_functions, messages, user_id)
 
     if response["choices"][0]["finish_reason"] == "function_call" and \
         response["choices"][0]["message"]["function_call"]["name"] == "get_app_url":
@@ -364,10 +362,11 @@ def ask(question):
         }
 
         # Add data to the conversation and tell model to give a new answer given new data
-        return enrich_model(response, use_functions, messages)
+        return enrich_model(response, use_functions, messages ,user_id)
+    
     return answer
 
-def enrich_model(response, use_functions, messages):
+def enrich_model(response, use_functions, messages, user_id):
     # This function grab the name of the function the model ran, as well as it's contents.
     # Then passes it into the chat log and tells the model to respond with the newest context (function's values)
 
@@ -388,19 +387,19 @@ def enrich_model(response, use_functions, messages):
     )
 
     # Tell the model to give a new answer based on the additional values
-    second_response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo-0613",
-        messages=messages
-    )
-
-    # Pass the new response from GPT on
-    return second_response["choices"][0]["message"]["content"]
-
-def append_interaction_to_conversation(answer):
-    # This function appends the answer from the model to the conversation
-    messages.append({"role":"assistant","content":answer})
-    logging.debug("append_interaction_to_conversation: messages var contains: {}".format(messages))
-    logging.debug("conversation total length is: {}".format(len(messages)))
+    try:
+        session = requests.Session()
+        retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+        session.mount('http://', HTTPAdapter(max_retries=retries))
+        response = openai.ChatCompletion.create(
+            model = "gpt-3.5-turbo-0613",
+            messages = messages
+        )
+        answer = response["choices"][0]["message"]["content"]
+        logging.info('response from openai is: {}'.format(response))
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error occurred: {e}"
+        logging.warning(error_message)
 
     # To limit number of tokens sent to OpenAI (there are limits), this starts to trim the conversation
     # after 8 answers. The trim stops once the conversation "history" hits 11 (the initial 3 seeded ones
@@ -413,4 +412,40 @@ def append_interaction_to_conversation(answer):
             messages.pop(3)
             counter +=1
         logging.debug("conversation popping is done. length is: {}".format(len(messages)))
-    return
+
+    # Persist this conversation so far.
+    messages.append(
+        {
+        "role" : "assistant",
+        "content" : answer
+        }
+    )
+    user_record={"messages":json.dumps(messages)}
+    r.set(user_id, json.dumps(user_record))
+
+    # Pass the new response from GPT on
+    return response["choices"][0]["message"]["content"]
+
+def get_hashed_user_id(plain_text_user):
+    # Hash a user's phone number for the first time
+    hashed = hashlib.sha256(plain_text_user.encode('utf-8'))
+    return hashed.hexdigest()
+
+# def append_interaction_to_conversation(answer):
+#     # This function appends the answer from the model to the conversation
+#     messages.append({"role":"assistant","content":answer})
+#     logging.debug("append_interaction_to_conversation: messages var contains: {}".format(messages))
+#     logging.debug("conversation total length is: {}".format(len(messages)))
+
+#     # To limit number of tokens sent to OpenAI (there are limits), this starts to trim the conversation
+#     # after 8 answers. The trim stops once the conversation "history" hits 11 (the initial 3 seeded ones
+#     # and the last 4 questions/answers)
+#     if len(messages) > 20:
+#         logging.info("starting to pop the conversation")
+#         counter = 0
+#         while counter < 11:
+#             logging.debug("conversation length is: {}".format(len(messages)))
+#             messages.pop(3)
+#             counter +=1
+#         logging.debug("conversation popping is done. length is: {}".format(len(messages)))
+#     return
