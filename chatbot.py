@@ -211,7 +211,7 @@ def ask(question,user_id):
         {
             "name": "set_production",
             "description": "Set what is currently in cyan app's staging into production. This takes only a few seconds. \
-                If you run this function again, it will rollback (aka roll back) production, fixing it.",
+                If you run this function again, it will rollback (aka roll back) production, fixing any mistakes.",
             "parameters": {
                 "type": "object",
                 "properties" : {}
@@ -232,6 +232,7 @@ def ask(question,user_id):
                 "required": ["app_name"]
             }
         }
+    ]
         # {
         #     "name": "create_app",
         #     "description": "Create a new app in Azure Spring Apps Enterprise",
@@ -247,8 +248,6 @@ def ask(question,user_id):
         #         "required": ["name"]
         #     }
         # }
-    ]
-
     #TODO: Confirm the 503 error (server overloaded) is resolved
     # Run the initial prompt through
     try:

@@ -52,11 +52,47 @@ az spring app deploy -n jarvis -d default --source-path . --env OPENAI_KEY="" TW
 - Twilio SID/Auth (req CC): https://console.twilio.com/?frameUrl=/console
 - Bot's phone number (Twilio): https://console.twilio.com/us1/develop/phone-numbers/manage/incoming
 
-# App Registration Steps in Azure
+# App Registration Steps via Azure UI (Custom Role)
 - Create an "App Registration" under the `Azure Active Directory` Azure service (see the `+ Add`)
 - Within your new App Registration, under `Certificates and Secrets`, create a new `client secrets`. Be sure and grab the `value` and save it. You'll need it for the `AZURE_APP_VALUEID` env var. Under `Overview`, you'll find `AZURE_DIRECTORYID` and `AZURE_APPID` information as well.
 - Go to your `Resource Group`, select `Access Control (IAM)`, under `+ Add` create a `custom role`. Role should have full read access to Azure Spring Apps, and write access to "Update the deployment of an app in Azure Spring Apps".
 - While still in `Access Control (IAM)`, create (`+ Add`) a `Role Assignment` and assign your custom role with your app registration.
+
+# App Registration Steps via Azure CLI (RG level Contributor Access)
+Create a registered app (`tanzu-jarvis`) with Contributor access.
+
+
+```
+export AZURE_SUBSCRIPTION=<Your Azure Subscription ID>
+export AZURE_TENANTID=<Your Tenant/Directory ID>
+export AZURE_RG=<Your resource group>
+
+# Login
+az login
+
+# Set Subscription ID
+az account set --subscription $AZURE_SUBSCRIPTION
+
+# Create a Registered App that will be used as the "user" for the script
+az ad app create --display-name tanzu-jarvis \
+&& AZURE_APP_ID=$(az ad app create --display-name tanzu-jarvis --query appId --output tsv)
+
+# Store this ID for future reference
+echo $AZURE_APP_ID
+
+# Grant the App Read-only access to your subscription
+spid=$(az ad sp create --id $AZURE_APP_ID --query id --output tsv) \
+&& az role assignment create --assignee $spid \
+--role "Contributor" \
+--subscription $AZURE_SUBSCRIPTION \
+--scope /subscriptions/$AZURE_SUBSCRIPTION/resourceGroups/$AZURE_RG
+
+# Create the "password" for the user, this will expire in 2 years
+AZURE_APP_VALUEID=$(az ad app credential reset --id $AZURE_APP_ID --append --display-name tanzu-jarvis --years 2 --query password --output tsv)
+
+# Store this password in a safe place (you can't access this again)
+echo $AZURE_APP_VALUEID
+```
 
 # Twilio Webhook Configuration Steps
 
@@ -68,6 +104,9 @@ az spring app deploy -n jarvis -d default --source-path . --env OPENAI_KEY="" TW
 - Text your bot 😀
 
 # Additional Things
+## Twilio Considerations
+Due to campaign laws, you must to register your Twilio phone number under a "campaign" assuming a phone number in the USA will be texting it (otherwise it gets blocked). This registration process can take up to 7 weeks.
+
 ## Required Environment Variables Explained
 ```
 OPENAI_KEY=""
