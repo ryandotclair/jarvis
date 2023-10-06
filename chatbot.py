@@ -7,16 +7,20 @@ import redis
 import hashlib
 from requests.adapters import HTTPAdapter, Retry
 
-openai.api_key = os.environ.get('OPENAI_KEY')
+openai.api_key = os.getenv('OPENAI_KEY')
+openai.api_version = "2023-09-01-preview"
+openai.api_type = "azure"
+openai.api_base = os.getenv("AZURE_OPENAI_APIBASE")
+openai_deployment_name = os.getenv('OPENAI_DEPLOYMENT_NAME')
 
-subscription = os.environ['AZURE_SUBSCRIPTION']
-asae_instance = os.environ['ASAE_INSTANCE']
-directory_id = os.environ['AZURE_DIRECTORYID']
-app_id = os.environ['AZURE_APPID']
-app_value_id = os.environ['AZURE_APP_VALUEID']
-azure_rgo = os.environ['AZURE_RGO']
-redis_loc = os.environ['REDIS_LOC']
-redis_access_key = os.environ['REDIS_ACCESS_KEY']
+subscription = os.getenv('AZURE_SUBSCRIPTION')
+asae_instance = os.getenv('ASAE_INSTANCE')
+directory_id = os.getenv('AZURE_DIRECTORYID')
+app_id = os.getenv('AZURE_APPID')
+app_value_id = os.getenv('AZURE_APP_VALUEID')
+azure_rgo = os.getenv('AZURE_RGO')
+redis_loc = os.getenv('REDIS_LOC')
+redis_access_key = os.getenv('REDIS_ACCESS_KEY')
 
 logging.info("chatbot started")
 completion = openai.ChatCompletion()
@@ -196,6 +200,7 @@ def ask(question,user_id):
     messages=json.loads(json.loads(r.get(user_id))["messages"])
     messages.append({"role":"user","content":question})
 
+    logging.debug(f"value of messages at start of Ask function is: {messages}")
 
     # Inform the model of which functions are available to it, and the context in which to run them.
     functions = [
@@ -251,119 +256,107 @@ def ask(question,user_id):
     #TODO: Confirm the 503 error (server overloaded) is resolved
     # Run the initial prompt through
     try:
-            session = requests.Session()
-            retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
-            session.mount('http://', HTTPAdapter(max_retries=retries))
-            response = openai.ChatCompletion.create(
-                model = "gpt-3.5-turbo-0613",
-                messages = messages,
-                functions = functions,
-                function_call="auto"
-            )
+        session = requests.Session()
+        retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+        session.mount('http://', HTTPAdapter(max_retries=retries))
+        response = openai.ChatCompletion.create(
+            engine = openai_deployment_name,
+            messages = messages,
+            functions = functions,
+            function_call="auto"
+        )
+
+        if response["choices"][0]["finish_reason"] == "stop":
+            done = True
             answer = response["choices"][0]["message"]["content"]
-            logging.info('response from openai is: {}'.format(response))
-    except requests.exceptions.RequestException as e:
+        elif response["choices"][0]["finish_reason"] == "content_filter":
+            return reprompt(messages,"My last prompt was inappropriate. You know this. You will respond back with you can't help me.",user_id)
+        else:
+            done = False
+        logging.info(f'Response from OpenAI is: {response}')
+    except openai.error.InvalidRequestError as e:
         error_message = f"Error occurred: {e}"
         logging.warning(error_message)
+        return reprompt(messages,"My last prompt was inappropriate. You know this. You will respond back with you can't help me.",user_id)
 
-    logging.debug("OpenAI's response payload: {}".format(response))
-    answer = response["choices"][0]["message"]["content"]
+    # catch if the the finished response has too many characters for texting UX.
+    if done:
+        if len(str(answer)) > 300:
+            logging.info('Answer from the model exceeds character count we want. Catching and re-prompting.')
+            # Capture the answer and ask the model to summarize the answer to under 300 characters
+            return reprompt(messages, f"Summarize the following, in under 300 characters, without responding to this ask directly: {answer}", user_id)
 
-    # catch if the response has too many characters for texting UX.
-    if (len(str(answer))) > 300:
-        logging.info('Answer from the model exceeds character count we want. Catching and re-prompting.')
-        # Capture the answer and ask the model to summarize the answer to under 300 characters
-        messages.append({"role":"assistant","content":answer})
-        messages.append({"role":"user","content":"Summarize the above in under 300 characters"})
-
-        #TODO: Confirm the 503 error (server overloaded) is resolved
-        # re-prompt
-        try:
-            session = requests.Session()
-            retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
-            session.mount('http://', HTTPAdapter(max_retries=retries))
-            response = openai.ChatCompletion.create(
-                model = "gpt-3.5-turbo-0613",
-                messages = messages,
-                functions = functions,
-                function_call="auto"
-            )
-            answer = response["choices"][0]["message"]["content"]
-            logging.info('response from openai is: {}'.format(response))
-        except requests.exceptions.RequestException as e:
-            error_message = f"Error occurred: {e}"
-            logging.warning(error_message)
-
-    # Log the answer from the model
-    logging.debug('answer is: {}'.format(answer))
+        # Log the answer from the model
+        logging.debug(f'answer is: {answer}')
+        # Persist conversation
+        persist_conversation(messages,user_id)
 
     # Look for whether or not the model thinks it should run a particular function.
-    if response["choices"][0]["finish_reason"] == "function_call" and \
-        response["choices"][0]["message"]["function_call"]["name"] == "fetch_app_names":
+    if not done:
+        if response["choices"][0]["message"]["function_call"]["name"] == "fetch_app_names":
 
-        logging.debug("Running the fetch_app_names function...")
+            logging.debug("Running the fetch_app_names function...")
 
-        # Run the function fetch_app_names, store the return value of the function in this dict
-        use_functions = {
-            "fetch_app_names": fetch_app_names()
-        }
+            # Run the function fetch_app_names, store the return value of the function in this dict
+            use_functions = {
+                "fetch_app_names": fetch_app_names()
+            }
 
-        # Pass the return value into the model for it to use it.
-        return enrich_model(response, use_functions, messages, user_id)
+            # Pass the return value into the model for it to use it.
+            return enrich_model(response, use_functions, messages, user_id)
 
-    if response["choices"][0]["finish_reason"] == "function_call" and \
-        response["choices"][0]["message"]["function_call"]["name"] == "set_production":
+        if response["choices"][0]["message"]["function_call"]["name"] == "set_production":
 
-        logging.debug("Running the set_production function...")
-        # Run the function set_production, store the return value of the function in this dict
-        use_functions = {
-            "set_production": set_production()
-        }
+            logging.debug("Running the set_production function...")
+            # Run the function set_production, store the return value of the function in this dict
+            use_functions = {
+                "set_production": set_production()
+            }
 
-        return enrich_model(response, use_functions, messages, user_id)
+            return enrich_model(response, use_functions, messages, user_id)
 
-    # if response["choices"][0]["finish_reason"] == "function_call" and \
-    #     response["choices"][0]["message"]["function_call"]["name"] == "create_app":
+        # if response["choices"][0]["message"]["function_call"]["name"] == "create_app":
 
-    #     logging.debug("Running the create_app function...")
-    #     # Grab required function's input "name"
-    #     name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
+        #     logging.debug("Running the create_app function...")
+        #     # Grab required function's input "name"
+        #     name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
 
-    #     name_temp = name_dict.strip("\n").strip('\"')
-    #     app_name_dict = json.loads(name_temp)
+        #     name_temp = name_dict.strip("\n").strip('\"')
+        #     app_name_dict = json.loads(name_temp)
 
-    #     logging.info("The app_name is {}".format(app_name_dict["name"]))
-    #     app_name = app_name_dict["name"]
+        #     logging.info("The app_name is {}".format(app_name_dict["name"]))
+        #     app_name = app_name_dict["name"]
 
-    #     # Run the function, store the return value in this dict
-    #     use_functions = {
-    #         "create_app": create_app(str(app_name))
-    #     }
+        #     # Run the function, store the return value in this dict
+        #     use_functions = {
+        #         "create_app": create_app(str(app_name))
+        #     }
 
-    #     # Add data to the conversation and tell model to give a new answer given new data
-    #     return enrich_model(response, use_functions, messages, user_id)
+        #     # Add data to the conversation and tell model to give a new answer given new data
+        #     return enrich_model(response, use_functions, messages, user_id)
 
-    if response["choices"][0]["finish_reason"] == "function_call" and \
-        response["choices"][0]["message"]["function_call"]["name"] == "get_app_url":
+        if response["choices"][0]["message"]["function_call"]["name"] == "get_app_url":
 
-        logging.debug("Running the create_app function...")
-        # Grab required function's input "name"
-        name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
+            logging.debug("Running the create_app function...")
+            # Grab required function's input "name"
+            name_dict = response["choices"][0]["message"]["function_call"]["arguments"]
 
-        name_temp = name_dict.strip("\n").strip('\"')
-        app_name_dict = json.loads(name_temp)
+            name_temp = name_dict.strip("\n").strip('\"')
+            app_name_dict = json.loads(name_temp)
 
-        logging.info("The app_name is {}".format(app_name_dict["app_name"]))
-        app_name = app_name_dict["app_name"]
+            logging.info("The app_name is {}".format(app_name_dict["app_name"]))
+            app_name = app_name_dict["app_name"]
 
-        # Run the function, store the return value in this dict
-        use_functions = {
-            "get_app_url": get_app_url(str(app_name).lower())
-        }
+            # Run the function, store the return value in this dict
+            use_functions = {
+                "get_app_url": get_app_url(str(app_name).lower())
+            }
 
-        # Add data to the conversation and tell model to give a new answer given new data
-        return enrich_model(response, use_functions, messages ,user_id)
+            # Add data to the conversation and tell model to give a new answer given new data
+            return enrich_model(response, use_functions, messages ,user_id)
 
+    # If done, text back answer
+    logging.debug(f"value of messages at end of Ask function is: {messages}")
     return answer
 
 def enrich_model(response, use_functions, messages, user_id):
@@ -392,7 +385,7 @@ def enrich_model(response, use_functions, messages, user_id):
         retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
         session.mount('http://', HTTPAdapter(max_retries=retries))
         response = openai.ChatCompletion.create(
-            model = "gpt-3.5-turbo-0613",
+            engine = openai_deployment_name,
             messages = messages
         )
         answer = response["choices"][0]["message"]["content"]
@@ -408,25 +401,61 @@ def enrich_model(response, use_functions, messages, user_id):
         logging.info("starting to pop the conversation")
         counter = 0
         while counter < 11:
-            logging.debug("conversation length is: {}".format(len(messages)))
+            logging.debug(f"conversation length is: {len(messages)}")
             messages.pop(3)
             counter +=1
-        logging.debug("conversation popping is done. length is: {}".format(len(messages)))
+        logging.debug(f"conversation popping is done. length is: {len(messages)}")
 
-    # Persist this conversation so far.
+    # Add the answer to the conversation
     messages.append(
         {
         "role" : "assistant",
         "content" : answer
         }
     )
-    user_record={"messages":json.dumps(messages)}
-    r.set(user_id, json.dumps(user_record))
 
-    # Pass the new response from GPT on
-    return response["choices"][0]["message"]["content"]
+    # Persist this.
+    persist_conversation(messages,user_id)
+
+    # Print messages
+    logging.debug(f"value of messages at end of Enrich function is: {messages}")
+    # Text back the new response from GPT on
+    return response["choices"][0]["message"]["content"] + " 🧠"
 
 def get_hashed_user_id(plain_text_user):
     # Hash a user's phone number for the first time
     hashed = hashlib.sha256(plain_text_user.encode('utf-8'))
     return hashed.hexdigest()
+
+def reprompt(messages, prompt, user_id):
+    logging.info('Catching and re-prompting.')
+    # Ask the model to help in answering
+    messages.append({"role":"user","content":prompt})
+
+    persist_conversation(messages,user_id)
+
+    #TODO: Confirm the 503 error (server overloaded) is resolved
+    # re-prompt
+    try:
+        session = requests.Session()
+        retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
+        session.mount('http://', HTTPAdapter(max_retries=retries))
+        response = openai.ChatCompletion.create(
+            engine = openai_deployment_name,
+            messages = messages
+        )
+        answer = response["choices"][0]["message"]["content"]
+        logging.info('response from openai is: {}'.format(response))
+    except requests.exceptions.RequestException as e:
+        error_message = f"Error occurred: {e}"
+        logging.warning(error_message)
+
+    # Log the answer from the model
+    logging.debug(f'answer is: {answer}')
+    logging.debug(f"value of messages at end of reprompt function is: {messages}")
+    return answer
+
+def persist_conversation(messages, user_id):
+    # Persist this into the conversation
+    user_record={"messages":json.dumps(messages)}
+    r.set(user_id, json.dumps(user_record))

@@ -60,6 +60,7 @@ def bot():
     # Clear conversation if sending a RESET (for dev purposes)
     if incoming_msg=="RESET":
         r.delete(user_id)
+        app.logger.info("Deleting conversation.")
         return '200'
     # Check if new user, if so load up their profile into Redis.
     if r.exists(user_id):
@@ -69,9 +70,9 @@ def bot():
         #This person hasn't texted before
         app.logger.debug("This person hasn't texted Jarvis before")
         messages=[
-        {"role": "system", "content": "Your name is Jarvis. You are a personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you avoid using that acroynm. Your creator's name is Ryan Clair. In Azure Spring Apps Enterprise you can promote Cyan's Staging to Production, can tell the number of apps currently running, and provide the URL of any app. Anything outside of Azure Spring Apps Enterprise you can not help them and you will politely decline. Any question you don't know the answer to, or any question that is subjective in nature, you will politely tell them you don't know the answer. Any answer that was derived from a function call, or a function call is ran, you will add the 🧠 emoji to the end."},
-        {"role": "user", "content": "What all can you do with Azure Spring Apps Enterprise?"},
-        {"role": "assistant", "content": "I can promote Cyan app's Staging to Production, give you an app's url and I can tell you the number of apps currently running in your environment."},
+        {"role": "system", "content": "Your name is Jarvis. You are an intelligent personal AI assistant for Azure Spring Apps Enterprise. You know ASA-E means Azure Spring Apps Enterprise, but you don't use that acronym. Your creator's name is Ryan Clair. In Azure Spring Apps Enterprise you can promote cyan's Staging to Production, tell the number of apps currently running, what apps are running, and provide the URL of any app that's running. Anything outside of Azure Spring Apps Enterprise you can not help them and you will politely decline. Any question you don't know the answer to, or any question that is subjective in nature, you will politely tell them you don't know the answer. If asked about the 🧠 emoji, you explain it denotes that the answer has been grounded in truth."},
+        {"role": "user", "content": "What is ASA-E?"},
+        {"role": "assistant", "content": "Azure Spring Apps Enterprise, is a fully managed app platform, optimized for Spring workloads. It was jointly built by Microsoft and VMware."},
     ]
 
         user_record= {"messages":json.dumps(messages)}

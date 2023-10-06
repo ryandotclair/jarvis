@@ -1,3 +1,15 @@
+# Overview
+Jarvis is a larg language model (LLM) chatbot, powered by Azure OpenAI, that's been trained to manipulate an Azure Spring Apps Enterprise instance. This is a demonstration of "the art of the possible".
+
+What Jarvis can currently do:
+- Tell you the number of apps deployed
+- The name of the apps deployed
+- Confirm if an app has been created or deleted
+- The app's URL
+- Promote what's in staging into production (hard coded currently to the "cyan" app, and two deployments [blue and green])
+- Rollback production (hard coded currently to the "cyan" app, and two deployments [blue and green])
+
+Jarvis uses the 🧠 emoji to denote actions that were grounded in fact (namely, the functions used to do the above actions). It also assumes you've turned on Azure's OpenAI [Content Filtering](https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/content-filter), to prevent both user and Jarvis from using harmful language.
 
 # How to deploy this to Azure Spring Apps Enterprise (Non-Production)
 
@@ -44,11 +56,15 @@ az spring create --name ${SPRING_APPS_SERVICE} \
 az spring app create --name jarvis
 
 # Ensure you're in the same directory as this code base and deploy the app (ex: jarvis)
-az spring app deploy -n jarvis -d default --source-path . --env OPENAI_KEY="" TWILIO_ACCOUNT_SID="" TWILIO_AUTH_TOKEN="" BOT_NUMBER="" SECRET_KEY="" AZURE_RGO="" AZURE_SUBSCRIPTION="" ASAE_INSTANCE="" AZURE_DIRECTORYID="" AZURE_APPID="" AZURE_APP_VALUEID="" BOT_URL="" REDIS_LOC="" REDIS_ACCESS_KEY=""
+az spring app deploy -n jarvis -d default --source-path . --env OPENAI_KEY="" AZURE_OPENAI_APIBASE="" OPENAI_DEPLOYMENT_NAME="" TWILIO_ACCOUNT_SID="" TWILIO_AUTH_TOKEN="" BOT_NUMBER="" SECRET_KEY="" AZURE_RGO="" AZURE_SUBSCRIPTION="" ASAE_INSTANCE="" AZURE_DIRECTORYID="" AZURE_APPID="" AZURE_APP_VALUEID="" BOT_URL="" REDIS_LOC="" REDIS_ACCESS_KEY=""
 ```
 
 # Where to get the keys
-- Open AI (req CC): https://platform.openai.com/account/api-keys
+- Azure Open AI: https://azure.microsoft.com/en-us/products/ai-services/openai-service
+    - The AZURE_OPENAI_APIBASE's value should look something like https://XXX.openai.azure.com (where XXX is specific to you)... this can be found in Azure OpenAI Studio, under Completions section, "view code" (see example code, the value in openai.api_base).
+    - OPENAI_KEY can be found in same "view code" section mentioned above, under Key.
+    - The OPENAI_DEPLOYMENT_NAME is found in Azure OpenAI Studio, under Deployments. This is something you create.
+    - Note: Requires 3.5-gpt-turbo or greater (Function support)
 - Twilio SID/Auth (req CC): https://console.twilio.com/?frameUrl=/console
 - Bot's phone number (Twilio): https://console.twilio.com/us1/develop/phone-numbers/manage/incoming
 
@@ -109,8 +125,14 @@ Due to campaign laws, you must to register your Twilio phone number under a "cam
 
 ## Required Environment Variables Explained
 ```
+AZURE_OPENAI_APIBASE=""
+# Required. Should look something like https://XXX.openai.azure.com (where XXX is specific to you)... this can be found in Azure OpenAI Studio, under Completions section, "view code" (see example code, the value in openai.api_base).
+
 OPENAI_KEY=""
-# Required. This is your OpenAI key found here (after signup): https://platform.openai.com/account/api-keys
+# Required. Can be found in same "view code" section mentioned above, under Key.
+
+OPENAI_DEPLOYMENT_NAME=""
+# Required. Can be found in Azure OpenAI Studio, under Deployments. This is something you create.
 
 SECRET_KEY=""
 # Required. This is just a random "secret" you use for Flask
